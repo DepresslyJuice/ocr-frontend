@@ -55,7 +55,10 @@ function OCRUploader() {
         };
       }
 
-      const response = await fetch("https://cors-anywhere.herokuapp.com/https://juanocrflaskocr123.azurewebsites.net/api/ocr", requestOptions);
+      const response = await fetch("https://juanocrflaskocr123.azurewebsites.net/api/ocr", {
+        ...requestOptions,
+        mode: 'cors'
+      });
 
       const data = await response.json();
       if (response.ok) {
