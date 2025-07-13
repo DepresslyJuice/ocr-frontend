@@ -1,77 +1,117 @@
 import React, { useState } from "react";
 
+const API_BASE = "https://juanocrflaskocr123.azurewebsites.net/api";
+
+const LANGUAGES = [
+  { code: "es", name: "🇪🇸 Español" },
+  { code: "en", name: "🇺🇸 Inglés" },
+  { code: "fr", name: "🇫🇷 Francés" },
+  { code: "de", name: "🇩🇪 Alemán" },
+  { code: "it", name: "🇮🇹 Italiano" },
+  { code: "pt", name: "🇵🇹 Portugués" }
+];
+
 function OCRUploader() {
   const [file, setFile] = useState(null);
   const [imageUrl, setImageUrl] = useState("");
   const [texto, setTexto] = useState("");
+  const [traduccion, setTraduccion] = useState("");
+  const [idiomaDetectado, setIdiomaDetectado] = useState("");
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState("");
   const [inputType, setInputType] = useState("file");
+  const [targetLanguage, setTargetLanguage] = useState("es");
+
+  const resetResults = () => {
+    setTexto("");
+    setTraduccion("");
+    setIdiomaDetectado("");
+    setError("");
+  };
 
   const handleFileChange = (e) => {
     setFile(e.target.files[0]);
-    setTexto("");
-    setError("");
+    resetResults();
   };
 
   const handleUrlChange = (e) => {
     setImageUrl(e.target.value);
-    setTexto("");
-    setError("");
+    resetResults();
   };
 
-  const handleUpload = async () => {
+  const validateInput = () => {
     if (inputType === "file" && !file) {
       setError("Selecciona una imagen primero.");
-      return;
+      return false;
     }
     if (inputType === "url" && !imageUrl) {
       setError("Ingresa una URL de imagen.");
-      return;
+      return false;
     }
+    return true;
+  };
+
+  const createRequestOptions = (isTranslate = false) => {
+    if (inputType === "file") {
+      const formData = new FormData();
+      formData.append("image", file);
+      if (isTranslate) formData.append("to", targetLanguage);
+      return { method: "POST", body: formData, credentials: "omit" };
+    } else {
+      const body = isTranslate 
+        ? { url: imageUrl, to: targetLanguage }
+        : { url: imageUrl };
+      return {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        credentials: "omit"
+      };
+    }
+  };
+
+  const handleAPICall = async (endpoint, isTranslate = false) => {
+    if (!validateInput()) return;
 
     setCargando(true);
-    setError("");
+    resetResults();
 
     try {
-      let requestOptions;
-      
-      if (inputType === "file") {
-        const formData = new FormData();
-        formData.append("image", file);
-        requestOptions = {
-          method: "POST",
-          body: formData,
-          credentials: "omit"
-        };
-      } else {
-        requestOptions = {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ url: imageUrl }),
-          credentials: "omit"
-        };
-      }
-
-      const response = await fetch("https://juanocrflaskocr123.azurewebsites.net/api/ocr", {
+      const requestOptions = createRequestOptions(isTranslate);
+      const response = await fetch(`${API_BASE}/${endpoint}`, {
         ...requestOptions,
         mode: 'cors'
       });
 
       const data = await response.json();
+      
       if (response.ok) {
-        setTexto(data.texto.join("\n"));
+        if (isTranslate) {
+          const textoResult = Array.isArray(data.texto_extraido) 
+            ? data.texto_extraido.join("\n") 
+            : data.texto_extraido || "No se pudo extraer texto";
+          setTexto(textoResult);
+          setTraduccion(data.texto_traducido || "No se pudo traducir");
+          setIdiomaDetectado(data.idioma_detectado || "");
+        } else {
+          const textoResult = Array.isArray(data.texto) 
+            ? data.texto.join("\n") 
+            : data.texto || "No se pudo extraer texto";
+          setTexto(textoResult);
+        }
       } else {
-        setError(data.error || "Error al procesar la imagen.");
+        setError(data.error || `Error ${response.status}: ${response.statusText}`);
       }
     } catch (err) {
-      setError("Error de red o del servidor.");
+      console.error(`Error en ${endpoint}:`, err);
+      setError(`Error de red: ${err.message}`);
     } finally {
       setCargando(false);
     }
   };
+
+  const handleUpload = () => handleAPICall("ocr");
+  const handleOCRTranslate = () => handleAPICall("ocr-translate", true);
 
   const styles = {
     container: {
@@ -119,16 +159,26 @@ function OCRUploader() {
       fontSize: "1rem",
       boxSizing: "border-box"
     },
+    buttonContainer: {
+      display: "flex", 
+      gap: "1rem", 
+      marginBottom: "1rem"
+    },
     button: {
-      width: "100%",
+      flex: 1,
       padding: "0.75rem",
-      backgroundColor: "#27ae60",
       color: "white",
       border: "none",
       borderRadius: "6px",
       fontSize: "1rem",
       cursor: "pointer",
       transition: "background-color 0.3s ease"
+    },
+    buttonPrimary: {
+      backgroundColor: "#27ae60"
+    },
+    buttonSecondary: {
+      backgroundColor: "#e74c3c"
     },
     buttonDisabled: {
       backgroundColor: "#95a5a6",
@@ -207,21 +257,59 @@ function OCRUploader() {
         )}
       </div>
 
-      <button 
-        onClick={handleUpload} 
-        disabled={cargando}
-        style={{
-          ...styles.button,
-          ...(cargando ? styles.buttonDisabled : {})
-        }}
-      >
-        {cargando ? "🔄 Procesando..." : "🚀 Analizar imagen"}
-      </button>
+      <div style={styles.inputContainer}>
+        <select 
+          value={targetLanguage}
+          onChange={(e) => setTargetLanguage(e.target.value)}
+          style={styles.input}
+        >
+          {LANGUAGES.map(lang => (
+            <option key={lang.code} value={lang.code}>{lang.name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div style={styles.buttonContainer}>
+        <button 
+          onClick={handleUpload} 
+          disabled={cargando}
+          style={{
+            ...styles.button,
+            ...styles.buttonPrimary,
+            ...(cargando ? styles.buttonDisabled : {})
+          }}
+        >
+          {cargando ? "🔄 Procesando..." : "🔍 Solo OCR"}
+        </button>
+        <button 
+          onClick={handleOCRTranslate} 
+          disabled={cargando}
+          style={{
+            ...styles.button,
+            ...styles.buttonSecondary,
+            ...(cargando ? styles.buttonDisabled : {})
+          }}
+        >
+          {cargando ? "🔄 Procesando..." : "🌐 OCR + Traducir"}
+        </button>
+      </div>
 
       {texto && (
         <div style={styles.resultContainer}>
           <strong style={{ color: "#27ae60", fontSize: "1.1rem" }}>✅ Texto reconocido:</strong>
           <p style={{ marginTop: "1rem", margin: 0 }}>{texto}</p>
+        </div>
+      )}
+
+      {traduccion && (
+        <div style={styles.resultContainer}>
+          <strong style={{ color: "#e74c3c", fontSize: "1.1rem" }}>🌐 Traducción:</strong>
+          {idiomaDetectado && (
+            <p style={{ fontSize: "0.9rem", color: "#666", margin: "0.5rem 0" }}>
+              🔍 Idioma detectado: {idiomaDetectado}
+            </p>
+          )}
+          <p style={{ marginTop: "1rem", margin: 0 }}>{traduccion}</p>
         </div>
       )}
 
